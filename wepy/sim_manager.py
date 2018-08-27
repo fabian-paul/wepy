@@ -56,6 +56,17 @@ class Manager(object):
             if debug_prints:
                 sys.stdout.write("Begin cycle {}\n".format(cycle_idx))
 
+            # provide walkers with unique indices
+            for i, w in enumerate(walkers):
+                w.unique_running_index = i
+
+            # provide walkers with uncorrelated random numbers.
+            # Since we will fan out into threads in the next step, this is the last
+            # chance to get uncorrelated random numbers.
+            if hasattr(self.runner.__class__, 'random_numbers'):
+                for w in walkers:
+                    w.random_seeds = self.runner.random_numbers()
+
             # run the segment
             start = time.time()
             new_walkers = self.run_segment(walkers, segment_length,

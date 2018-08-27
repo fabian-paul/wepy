@@ -98,7 +98,7 @@ class NoBC(BoundaryConditions):
     def check_boundaries(self, walker):
         return False, {}
 
-    def warp_walkers(self, walkers):
+    def warp_walkers(self, walkers, cycle_idx, debug_prints=False):
         # in order the walkers after applying warps:
         # warping, bc, progress
         warp_data = {}

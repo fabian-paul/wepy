@@ -1,0 +1,37 @@
+#!/usr/bin/env python
+import toymodel
+import argparse
+import numpy as np
+
+def propagate(x0=None, n_steps=10000, stride=10, seed=0):
+    delta = [np.array([1.0], dtype=np.float32), np.array([0.5, 0.3], dtype=np.float32), np.array([0.1, np.inf, np.inf, 0.15], dtype=np.float32)]
+    h = [np.array([3.0], dtype=np.float32), np.array([2.0, 2.0], dtype=np.float32), np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32)]
+    traj = np.zeros((n_steps+1, 3), dtype=np.float32)
+    if x0 is None:
+        x0 = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    toymodel.propagate(n_steps, x0, delta, h, traj, stride=stride, rng_seed=seed)
+    return traj
+
+if __name__=='__main__':
+    parser = argparse.ArgumentParser(description='Propagate N-D toy model')
+    parser.add_argument('--initial', metavar='npyfile', default=None,
+                    help='npy file name that contains that initial configuration; if the file contains more than one time steps, the last is used.')
+    parser.add_argument('--n', metavar='steps', default=10000,
+                    help='number of integration steps')
+    parser.add_argument('--stride', metavar='steps', default=1,
+                    help='save every n\'th step')
+    parser.add_argument('--seed', metavar='interger', default=0,
+                    help='initialize random numeber generator with this unsigned integer')
+    parser.add_argument('output',
+                    help='npy file name for output trajectory')
+
+    args = parser.parse_args()
+
+    if args.initial is not None:
+        x0 = np.load(args.initial)
+        if x0.ndim == 2:
+           x0 = x0[-1, :]
+    else:
+        x0 = None
+    traj = propagate(x0, n_steps=int(args.n)*int(args.stride), stride=int(args.stride), seed=int(args.seed))
+    np.save(args.output, traj)
