@@ -71,6 +71,11 @@ class Manager(object):
             start = time.time()
             new_walkers = self.run_segment(walkers, segment_length,
                                            debug_prints=debug_prints)
+
+            # run post-iteration script
+            if hasattr(self.runner.__class__, 'run_post_iter'):
+                self.runner.run_post_iter(walkers=walkers)
+
             end = time.time()
             runner_time = end - start
 

@@ -54,5 +54,6 @@ def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100):
 
 if __name__=='__main__':
     import os
-    os.environ['WEST_SIM_ROOT'] = os.getcwd()
+    if not 'WEST_SIM_ROOT' in os.environ:
+        os.environ['WEST_SIM_ROOT'] = os.getcwd()
     main()

@@ -18,9 +18,11 @@ class WestpaRunner(Runner):
     # TODO: use westpa configuration file for the name of executables
     def __init__(self,
                  runseg='$WEST_SIM_ROOT/westpa_scripts/runseg.sh',
-                 get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh'):
+                 get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh',
+                 post_iter='$WEST_SIM_ROOT/westpa_scripts/post_iter.sh'):
         self.runseg = runseg
         self.get_pcoord = get_pcoord
+        self.post_iter = post_iter
         if 'WEST_SIM_ROOT' not in os.environ:
             raise RuntimeError('Environment variable WEST_SIM_ROOT not set.')
         self.west_sim_root = os.environ['WEST_SIM_ROOT']
@@ -75,6 +77,21 @@ class WestpaRunner(Runner):
         new_walker = Walker(state=new_state, weight=walker.weight)
 
         return new_walker
+
+    def run_post_iter(self, walkers):
+        post_iter = os.path.expandvars(self.post_iter)
+        if os.path.exists(post_iter):
+            iteration = walkers[0].state['iteration']
+
+            env = dict(os.environ)
+
+            env['SEG_DEBUG'] = ''
+            env['WEST_CURRENT_ITER'] = '%d' % iteration
+
+            erl = subprocess.call(post_iter, shell=True, env=env)
+            if erl != 0:
+                raise RuntimeError('running post-iteration script failed')
+
 
 
 class WestpaWalkerState(WalkerState):
