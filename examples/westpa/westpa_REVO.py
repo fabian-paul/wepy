@@ -5,7 +5,7 @@ from wepy.sim_manager import Manager
 from wepy.work_mapper.mapper import WorkerMapper, Worker
 
 # the runner for running dynamics and making and it's particular state class
-from wepy.runners.westpa import WestpaRunner, WestpaWalkerState, WestpaReporter, PairDistance
+from wepy.runners.westpa import WestpaRunner, WestpaWalkerState, WestpaReporter, PairDistance, walkers_from_disk
 from wepy.walker import Walker
 
 # classes for making the resampler
@@ -18,7 +18,7 @@ from wepy.boundary_conditions.boundary import NoBC
 #from wepy.reporter.hdf5 import WepyHDF5Reporter
 
 
-def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100):
+def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continue_sim=False):
     runner = WestpaRunner()
 
     init_state = WestpaWalkerState.from_bstate(struct_data_ref='$WEST_SIM_ROOT/bstates/0')
@@ -27,7 +27,10 @@ def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100):
 
     init_weight = 1.0 / n_walkers
 
-    init_walkers = [Walker(init_state, init_weight) for i in range(n_walkers)]
+    if continue_sim:
+        init_walkers = [Walker(init_state, init_weight) for i in range(n_walkers)]
+    else:
+        init_walkers = walkers_from_disk(n_expected_walkers=n_walkers)
 
     unb_distance = PairDistance()
 
