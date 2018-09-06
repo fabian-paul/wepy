@@ -317,11 +317,13 @@ class REVOResampler(Resampler):
             image = self.distance.image(walker.state)
             images.append(image)
 
+        avg_coordinate_weights = np.mean([w.state.coordinate_weights for w in walkers])
+
         # get the combinations of indices for all walker pairs
         for i, j in it.combinations(range(len(images)), 2):
 
             # calculate the distance between the two walkers
-            dist = self.distance.image_distance(images[i], images[j])
+            dist = self.distance.image_distance(images[i], images[j], coordinate_weights=avg_coordinate_weights)
 
             # save this in the matrix in both spots
             dist_mat[i][j] = dist

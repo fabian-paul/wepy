@@ -19,12 +19,10 @@ class WestpaRunner(Runner):
     def __init__(self,
                  runseg='$WEST_SIM_ROOT/westpa_scripts/runseg.sh',
                  get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh',
-                 post_iter='$WEST_SIM_ROOT/westpa_scripts/post_iter.sh',
-                 use_history=False):
+                 post_iter='$WEST_SIM_ROOT/westpa_scripts/post_iter.sh'):
         self.runseg = runseg
         self.get_pcoord = get_pcoord
         self.post_iter = post_iter
-        self.use_history = use_history
         if 'WEST_SIM_ROOT' not in os.environ:
             raise RuntimeError('Environment variable WEST_SIM_ROOT not set.')
         self.west_sim_root = os.environ['WEST_SIM_ROOT']
@@ -75,14 +73,11 @@ class WestpaRunner(Runner):
         pcoor_file.close()
 
         x = np.atleast_2d(pcoor)[-1, :]
-        if self.use_history:
-            running_acv = walker.state.running_acv
+
+        running_acv = walker.state.running_acv
+        if running_acv is not None:
             running_acv.add(x)
-            # TODO: average acf across the ensemble?
-            new_state = WestpaWalkerState(positions=x*np.sqrt(running_acv.acf), iteration=iteration, parent_id=id,
-                                          running_acv=running_acv)
-        else:
-            new_state = WestpaWalkerState(positions=x, iteration=iteration, parent_id=id, running_acv=object())
+        new_state = WestpaWalkerState(positions=x, iteration=iteration, parent_id=id, running_acv=running_acv)
         if debug_prints:
             print('walker #', id, 'with parent', parent_id, 'has weight', walker.weight)
         # Here we create a new walker with a new walker state.
@@ -108,7 +103,7 @@ class WestpaRunner(Runner):
 
 class RunningAutoCovar(object):
     'Computes the mean, variance and time-lagged autocovariance of a time series'
-    def __init__(self, n_lag=100, n_decay=None, min_frames=10):
+    def __init__(self, n_lag=10, n_decay=None, min_frames=10):
         r"""Computes the mean, variance and time-lagged autocovariance of a time series
 
         :param n_lag: int
@@ -128,13 +123,12 @@ class RunningAutoCovar(object):
         self.deque = collections.deque(maxlen=n_lag)
         self.mean1 = None
         self.mean0 = None
-        self.var00 = None
-        self.var11 = None
-        self.acv01 = None
-        self.acv10 = None
-        self.n = 0
+        self.var0 = None
+        self.var1 = None
+        self.acv = None
         self.dim = None
         self.dtype = None
+        self.n_frames_seen = 0
 
     def add(self, x1):
         r"""Add a frame to the estimation
@@ -143,44 +137,44 @@ class RunningAutoCovar(object):
             data point, 1-D
         """
         if self.dim is None:
-            self.dim = x1.dim
+            self.dim = x1.shape[0]
             self.dtype = x1.dtype
 
         self.deque.append(x1)
 
-        # see https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+        # https://en.wikipedia.org/wiki/Moving_average#Exponentially_weighted_moving_variance_and_standard_deviation
+        # https://stats.stackexchange.com/questions/6874/exponential-weighted-moving-skewness-kurtosis
+        alpha = self.alpha
         if len(self.deque) >= self.n_lag:
             # update means and variances
-            last_mean1 = self.mean1
-            if self.n == 0:
+            if self.mean1 is None:
                 self.mean1 = x1
-                self.var11 = np.zeros_like(x1)
+                self.var1 = np.zeros_like(x1)
             else:
-                self.mean1 = self.alpha*(self.n - 1)/float(self.n)*self.mean1 + x1/self.n
-                self.var11 = self.alpha*self.var11 + (x1 - last_mean1)*(x1 - self.mean1)
+                delta1 = x1 - self.mean1
+                self.mean1 = self.mean1 + alpha*delta1
+                self.var1 = (1. - alpha)*(self.var1 + alpha*delta1*delta1)
 
             x0 = self.deque[0]
 
             # update lagged variance
-            last_mean0 = self.mean0
-            if self.n == 0:
+            if self.mean0 is None:
                 self.mean0 = x0
-                self.var00 = np.zeros_like(x0)
+                self.var0 = np.zeros_like(x0)
             else:
-                self.mean0 = self.alpha*(self.n - 1)/float(self.n)*self.mean0 + x0/self.n
-                self.sum0 = (self.n-1)*self.mean0 + x0  # ????
-                self.var00 = self.alpha*self.var00 + (x0 - last_mean0)*(x0 - self.mean0)
+                delta0 = x0 - self.mean0
+                self.mean0 = self.mean0 + alpha*delta0
+                self.var0 = (1. - alpha)*(self.var0 + alpha*delta0*delta0)
 
             # update (time-lagged) auto-covariances
-            if self.n == 0:
-                self.acv01 = np.zeros_like(x0)
-                self.acv10 = np.zeros_like(x0)
+            if self.acv is None:
+                self.acv = np.zeros_like(x0)
             else:
-                self.acv01 = self.alpha*self.acv01 + (x1 - last_mean1)*(x0 - self.mean0)
-                self.acv10 = self.alpha*self.acv10 + (x1 - self.mean1)*(x0 - last_mean0)
+                self.acv = (1. - alpha)*(self.acv + alpha*delta0*delta1)
 
-            self.n += 1
-            self.n += self.alpha*self.n + 1
+            self.n_frames_seen += 1
+
+            print('current acf', self.acf)
 
 
     @property
@@ -190,8 +184,8 @@ class RunningAutoCovar(object):
         :return: np.ndarray(N)
             The time-lagged autocorrelation for each time series.
         """
-        if self.n >= self.min_frames:
-            return (self.acv01 + self.acv01) / (self.var00 + self.var11)
+        if self.n_frames_seen >= self.min_frames:
+            return np.abs(self.acv) / (np.sqrt(self.var0)*np.sqrt(self.var1))
         else:
             return np.ones(self.dim, dtype=self.dtype)
 
@@ -205,29 +199,44 @@ class WestpaWalkerState(WalkerState):
         self.iteration = iteration
         self.parent_id = parent_id
         self.struct_data_ref = struct_data_ref
-        if running_acv is None:
-            self.running_acv = RunningAutoCovar()
-        else:
-            self.running_acv = running_acv
+        self.running_acv = running_acv
         if 'WEST_SIM_ROOT' not in os.environ:
             raise RuntimeError('Environment variable WEST_SIM_ROOT not set.')
         self.west_sim_root = os.environ['WEST_SIM_ROOT']
         self._data = self.__dict__
 
+    @property
+    def coordinate_weights(self):
+        if self.running_acv is None:
+            return 1.0
+        else:
+            return self.running_acv.acf
+
     @classmethod
     def from_bstate(cls,
                     struct_data_ref='$WEST_SIM_ROOT/bstates/0',
-                    get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh'):
+                    get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh',
+                    use_history=False):
         struct_data_ref = os.path.expandvars(struct_data_ref)
         p_coord = cls.get_pcoords(struct_data_ref=struct_data_ref, get_pcoord=get_pcoord)
-        return cls(positions=np.atleast_2d(p_coord)[-1, :], iteration=0, parent_id=-1, struct_data_ref=struct_data_ref)
+        if use_history:
+            running_acv = RunningAutoCovar()
+        else:
+            running_acv = None
+        return cls(positions=np.atleast_2d(p_coord)[-1, :], iteration=0, parent_id=-1, struct_data_ref=struct_data_ref,
+                   running_acv=running_acv)
 
     @classmethod
     def from_file(cls, iteration, id, path='$WEST_SIM_ROOT/traj_segs/%06d/%06d',
-                  get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh'):
+                  get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh',
+                  use_history=False):
         path = os.path.expandvars(path % (iteration, id))
         p_coord = cls.get_pcoords(struct_data_ref=path, get_pcoord=get_pcoord)
-        return cls(positions=np.atleast_2d(p_coord)[-1, :], iteration=iteration, parent_id=id)
+        if use_history:
+            running_acv = RunningAutoCovar()
+        else:
+            running_acv = None
+        return cls(positions=np.atleast_2d(p_coord)[-1, :], iteration=iteration, parent_id=id, running_acv=running_acv)
 
     @staticmethod
     def get_pcoords(struct_data_ref, get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh'):
@@ -298,7 +307,10 @@ class PairDistance(Distance):
     def image(self, state):
         return state['positions']
 
-    def image_distance(self, image_a, image_b):
+    def image_distance(self, image_a, image_b, coordinate_weights=None):
         dim = image_a.shape[0]
-        dist = np.linalg.norm(image_a - image_b) / dim**0.5
-        return dist
+        if coordinate_weights is None:
+            return np.linalg.norm(image_a - image_b) / dim**0.5
+        else:
+            return np.linalg.norm((image_a - image_b)*coordinate_weights) / (np.linalg.norm(coordinate_weights)*dim**0.5)
+
