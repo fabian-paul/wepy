@@ -174,7 +174,7 @@ class RunningAutoCovar(object):
 
             self.n_frames_seen += 1
 
-            print('current acf', self.acf)
+            #print('current acf', self.acf)
 
 
     @property
