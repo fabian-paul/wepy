@@ -19,10 +19,12 @@ class WestpaRunner(Runner):
     def __init__(self,
                  runseg='$WEST_SIM_ROOT/westpa_scripts/runseg.sh',
                  get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh',
-                 post_iter='$WEST_SIM_ROOT/westpa_scripts/post_iter.sh'):
+                 post_iter='$WEST_SIM_ROOT/westpa_scripts/post_iter.sh',
+                 use_history=False):
         self.runseg = runseg
         self.get_pcoord = get_pcoord
         self.post_iter = post_iter
+        self.use_history = use_history
         if 'WEST_SIM_ROOT' not in os.environ:
             raise RuntimeError('Environment variable WEST_SIM_ROOT not set.')
         self.west_sim_root = os.environ['WEST_SIM_ROOT']
@@ -71,9 +73,20 @@ class WestpaRunner(Runner):
         # creates new_walker from new state and current weight
         pcoor = np.loadtxt(pcoor_file)
         pcoor_file.close()
-        new_state = WestpaWalkerState(positions=np.atleast_2d(pcoor)[-1, :], iteration=iteration, parent_id=id)
+
+        x = np.atleast_2d(pcoor)[-1, :]
+        if self.use_history:
+            running_acv = walker.state.running_acv
+            running_acv.add(x)
+            # TODO: average acf across the ensemble?
+            new_state = WestpaWalkerState(positions=x*np.sqrt(running_acv.acf), iteration=iteration, parent_id=id,
+                                          running_acv=running_acv)
+        else:
+            new_state = WestpaWalkerState(positions=x, iteration=iteration, parent_id=id, running_acv=object())
         if debug_prints:
             print('walker #', id, 'with parent', parent_id, 'has weight', walker.weight)
+        # Here we create a new walker with a new walker state.
+        # If if the walker state contains history information.
         new_walker = Walker(state=new_state, weight=walker.weight)
 
         return new_walker
@@ -93,15 +106,109 @@ class WestpaRunner(Runner):
                 raise RuntimeError('running post-iteration script failed')
 
 
+class RunningAutoCovar(object):
+    'Computes the mean, variance and time-lagged autocovariance of a time series'
+    def __init__(self, n_lag=100, n_decay=None, min_frames=10):
+        r"""Computes the mean, variance and time-lagged autocovariance of a time series
+
+        :param n_lag: int
+            lag time of
+        :param n_decay: int or None
+            parametrizes the speed with which past frames are forgotten
+            If `n_decay` is None, use `2*n_lag`.
+        :param min_frames: int
+            only report statistical averages when at least n_lag + min_frames have been added
+        """
+        import collections
+        self.n_lag = n_lag
+        if n_decay is None:
+            n_decay = 2*n_lag
+        self.alpha = np.exp(-1.0/n_decay)  # alpha**n_decay = 1/e
+        self.min_frames = min_frames
+        self.deque = collections.deque(maxlen=n_lag)
+        self.mean1 = None
+        self.mean0 = None
+        self.var00 = None
+        self.var11 = None
+        self.acv01 = None
+        self.acv10 = None
+        self.n = 0
+        self.dim = None
+        self.dtype = None
+
+    def add(self, x1):
+        r"""Add a frame to the estimation
+
+        :param x1: np.ndarray(N)
+            data point, 1-D
+        """
+        if self.dim is None:
+            self.dim = x1.dim
+            self.dtype = x1.dtype
+
+        self.deque.append(x1)
+
+        # see https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+        if len(self.deque) >= self.n_lag:
+            # update means and variances
+            last_mean1 = self.mean1
+            if self.n == 0:
+                self.mean1 = x1
+                self.var11 = np.zeros_like(x1)
+            else:
+                self.mean1 = self.alpha*(self.n - 1)/float(self.n)*self.mean1 + x1/self.n
+                self.var11 = self.alpha*self.var11 + (x1 - last_mean1)*(x1 - self.mean1)
+
+            x0 = self.deque[0]
+
+            # update lagged variance
+            last_mean0 = self.mean0
+            if self.n == 0:
+                self.mean0 = x0
+                self.var00 = np.zeros_like(x0)
+            else:
+                self.mean0 = self.alpha*(self.n - 1)/float(self.n)*self.mean0 + x0/self.n
+                self.sum0 = (self.n-1)*self.mean0 + x0  # ????
+                self.var00 = self.alpha*self.var00 + (x0 - last_mean0)*(x0 - self.mean0)
+
+            # update (time-lagged) auto-covariances
+            if self.n == 0:
+                self.acv01 = np.zeros_like(x0)
+                self.acv10 = np.zeros_like(x0)
+            else:
+                self.acv01 = self.alpha*self.acv01 + (x1 - last_mean1)*(x0 - self.mean0)
+                self.acv10 = self.alpha*self.acv10 + (x1 - self.mean1)*(x0 - last_mean0)
+
+            self.n += 1
+            self.n += self.alpha*self.n + 1
+
+
+    @property
+    def acf(self):
+        r"""Compute the time-lagged autocorrlation. This is the autocorrelation function at lag time n_lag
+
+        :return: np.ndarray(N)
+            The time-lagged autocorrelation for each time series.
+        """
+        if self.n >= self.min_frames:
+            return (self.acv01 + self.acv01) / (self.var00 + self.var11)
+        else:
+            return np.ones(self.dim, dtype=self.dtype)
+
+
 
 class WestpaWalkerState(WalkerState):
     'WESTPA compatibility layer for wepy'
 
-    def __init__(self, positions, iteration, parent_id=None, struct_data_ref=None):
+    def __init__(self, positions, iteration, parent_id=None, struct_data_ref=None, running_acv=None):
         self.positions = positions
         self.iteration = iteration
         self.parent_id = parent_id
         self.struct_data_ref = struct_data_ref
+        if running_acv is None:
+            self.running_acv = RunningAutoCovar()
+        else:
+            self.running_acv = running_acv
         if 'WEST_SIM_ROOT' not in os.environ:
             raise RuntimeError('Environment variable WEST_SIM_ROOT not set.')
         self.west_sim_root = os.environ['WEST_SIM_ROOT']
@@ -164,7 +271,7 @@ def walkers_from_disk(n_expected_walkers=48, path='$WEST_SIM_ROOT/traj_segs/'):
     if max_iteration == -1:
         raise RuntimeError('no valid iteration found')
 
-    weights = np.ones(n_expected_walkers, dtype=float) / n_expected_walkers
+    weights = np.ones(n_expected_walkers, dtype=float) / n_expected_walkers  # TODO: recover the correct weights from restart file
 
     assert n_found_walkers[max_iteration] == n_expected_walkers
     walkers = [Walker(WestpaWalkerState.from_file(iteration=max_iteration, id=i), weight=weights[i]) for i in range(n_found_walkers[max_iteration])]

@@ -34,7 +34,7 @@ def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continu
 
     unb_distance = PairDistance()
 
-    resampler = REVOResampler(distance=unb_distance, init_state=init_state)
+    resampler = REVOResampler(distance=unb_distance, init_state=init_state, dpower=4)
 
     reporter = WestpaReporter()
 
