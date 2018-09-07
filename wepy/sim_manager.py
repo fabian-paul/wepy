@@ -245,7 +245,7 @@ class Manager(object):
 
         return walkers
 
-    def continue_run_simulation(self, run_idx, n_cycles, segment_lengths, num_workers=None,
+    def continue_run_simulation(self, run_idx, n_cycles, segment_lengths, num_workers=None, start_cycle=0,
                                 debug_prints=False):
         """Continue a simulation. All this does is provide a run idx to the
         reporters, which is the run that is intended to be
@@ -259,7 +259,7 @@ class Manager(object):
 
         walkers = self.init_walkers
         # the main cycle loop
-        for cycle_idx in range(n_cycles):
+        for cycle_idx in range(start_cycle, start_cycle + n_cycles):
             walkers = self.run_cycle(walkers, segment_lengths[cycle_idx], cycle_idx,
                                          debug_prints=debug_prints)
 
