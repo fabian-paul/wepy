@@ -17,8 +17,9 @@ from wepy.boundary_conditions.boundary import NoBC
 from copy import deepcopy
 
 # standard reporters
-#from wepy.reporter.hdf5 import WepyHDF5Reporter
+from wepy.reporter.reporter import WalkersPickleReporter
 
+from copy import deepcopy
 
 def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continue_sim=False):
     runner = WestpaRunner()
@@ -27,18 +28,19 @@ def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continu
 
     work_mapper = WorkerMapper(worker_type=Worker, num_workers=n_workers)
 
-    init_weight = 1.0 / n_walkers
-
     if continue_sim:
-        init_walkers = walkers_from_disk(n_expected_walkers=n_walkers)
+        # init_walkers = walkers_from_disk(n_expected_walkers=n_walkers)
+        init_walkers, start_cycle = WalkersPickleReporter.load_most_recent_cycle(debug_prints=True)
     else:
+        start_cycle = 0
+        init_weight = 1.0 / n_walkers
         init_walkers = [Walker(deepcopy(init_state), init_weight) for i in range(n_walkers)]
 
     unb_distance = PairDistance()
 
     resampler = REVOResampler(distance=unb_distance, init_state=init_state, dpower=2)
 
-    reporter = WestpaReporter()
+    reporter = WalkersPickleReporter(freq=10)
 
     # Instantiate a simulation manager
     sim_manager = Manager(init_walkers,
@@ -48,17 +50,18 @@ def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continu
                           work_mapper=work_mapper,
                           reporters=[reporter])
 
-    steps = [n_steps for i in range(n_cycles)]
+    segment_lengths = [n_steps for i in range(start_cycle + n_cycles)]
 
     ### RUN the simulation
     for run_idx in range(n_runs):
         print("Starting run: {}".format(run_idx))
-        sim_manager.run_simulation(n_cycles, steps)#, debug_prints=True)
+        sim_manager.continue_run_simulation(0, n_cycles, segment_lengths, num_workers=n_workers, start_cycle=start_cycle)#, debug_prints=True)
         print("Finished run: {}".format(run_idx))
 
 
 if __name__=='__main__':
     import os
+    import sys
     if not 'WEST_SIM_ROOT' in os.environ:
         os.environ['WEST_SIM_ROOT'] = os.getcwd()
-    main()
+    main(continue_sim=len(sys.argv) > 1 and sys.argv[1]=='--continue')
