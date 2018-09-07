@@ -5,7 +5,7 @@ from wepy.sim_manager import Manager
 from wepy.work_mapper.mapper import WorkerMapper, Worker
 
 # the runner for running dynamics and making and it's particular state class
-from wepy.runners.westpa import WestpaRunner, WestpaWalkerState, WestpaReporter, PairDistance
+from wepy.runners.westpa import WestpaRunner, WestpaWalkerState, PairDistance
 from wepy.walker import Walker
 
 # classes for making the resampler
@@ -18,6 +18,7 @@ from wepy.boundary_conditions.boundary import NoBC
 from wepy.reporter.reporter import WalkersPickleReporter
 
 from copy import deepcopy
+
 
 def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continue_sim=False):
     runner = WestpaRunner()
@@ -34,11 +35,12 @@ def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continu
         init_weight = 1.0 / n_walkers
         init_walkers = [Walker(deepcopy(init_state), init_weight) for i in range(n_walkers)]
 
+
     unb_distance = PairDistance()
 
     resampler = REVOResampler(distance=unb_distance, init_state=init_state)
 
-    reporter = WalkersPickleReporter(freq=10)
+    reporters = [WalkersPickleReporter(freq=10)]
 
     # Instantiate a simulation manager
     sim_manager = Manager(init_walkers,
@@ -46,20 +48,21 @@ def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continu
                           resampler=resampler,
                           boundary_conditions=NoBC(),
                           work_mapper=work_mapper,
-                          reporters=[reporter])
+                          reporters=reporters)
 
     segment_lengths = [n_steps for i in range(start_cycle + n_cycles)]
 
     ### RUN the simulation
     for run_idx in range(n_runs):
         print("Starting run: {}".format(run_idx))
-        sim_manager.continue_run_simulation(0, n_cycles, segment_lengths, num_workers=n_workers, start_cycle=start_cycle)#, debug_prints=True)
+        sim_manager.continue_run_simulation(0, n_cycles, segment_lengths, num_workers=n_workers,
+                                            start_cycle=start_cycle)#, debug_prints=True)
         print("Finished run: {}".format(run_idx))
 
 
 if __name__=='__main__':
     import os
     import sys
-    if not 'WEST_SIM_ROOT' in os.environ:
+    if 'WEST_SIM_ROOT' not in os.environ:
         os.environ['WEST_SIM_ROOT'] = os.getcwd()
-    main(continue_sim=len(sys.argv) > 1 and sys.argv[1]=='--continue')
+    main(continue_sim=len(sys.argv) > 1 and sys.argv[1] == '--continue')
