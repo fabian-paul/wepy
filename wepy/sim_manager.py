@@ -32,7 +32,7 @@ class Manager(object):
         self.work_mapper = work_mapper
 
 
-    def run_segment(self, walkers, segment_length, debug_prints=False):
+    def run_segment(self, walkers, segment_length, random_seeds=None, debug_prints=False):
         """Run a time segment for all walkers using the available workers. """
 
         num_walkers = len(walkers)
@@ -40,11 +40,15 @@ class Manager(object):
         if debug_prints:
             sys.stdout.write("Starting segment\n")
 
-        new_walkers = list(self.work_mapper.map(walkers,
-                                                (segment_length for i in range(num_walkers)),
-                                                debug_prints=debug_prints
-                                               )
-                          )
+        segment_lengths = (segment_length for i in range(num_walkers))
+        propagation_ids = range(num_walkers)
+        if random_seeds is not None:
+            new_walkers = list(self.work_mapper.map(walkers, segment_lengths, propagation_ids, random_seeds,
+                               debug_prints=debug_prints))
+        else:
+            new_walkers = list(self.work_mapper.map(walkers, segment_lengths, propagation_ids,
+                               debug_prints=debug_prints))
+
         if debug_prints:
             sys.stdout.write("Ending segment\n")
 
@@ -56,20 +60,17 @@ class Manager(object):
             if debug_prints:
                 sys.stdout.write("Begin cycle {}\n".format(cycle_idx))
 
-            # provide walkers with unique indices
-            for i, w in enumerate(walkers):
-                w.unique_running_index = i
-
             # provide walkers with uncorrelated random numbers.
             # Since we will fan out into threads in the next step, this is the last
             # chance to get uncorrelated random numbers.
             if hasattr(self.runner.__class__, 'random_numbers'):
-                for w in walkers:
-                    w.random_seeds = self.runner.random_numbers()
+                random_seeds= [self.runner.random_numbers() for _ in walkers]
+            else:
+                random_seeds = None
 
             # run the segment
             start = time.time()
-            new_walkers = self.run_segment(walkers, segment_length,
+            new_walkers = self.run_segment(walkers, segment_length, random_seeds=random_seeds,
                                            debug_prints=debug_prints)
 
             # run post-iteration script

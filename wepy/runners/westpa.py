@@ -36,10 +36,9 @@ class WestpaRunner(Runner):
         rv['WEST_RANDFLOAT'] = '%f' % np.random.rand(1)
         return rv
 
-    def run_segment(self, walker, segment_length, debug_prints=False):
+    def run_segment(self, walker, segment_length, propagation_id, random_seeds, debug_prints=False):
         # segment_length is ignored for now
-        parent_id = walker.state.parent_id
-        id = walker.unique_running_index  # provided by the simulation managers (only the manager sees all walkers together)
+        parent_id = walker.state.id
         iteration = walker.state['iteration'] + 1  # TODO: increment here or later?
         root = self.west_sim_root
 
@@ -53,11 +52,11 @@ class WestpaRunner(Runner):
             env['WEST_CURRENT_SEG_INITPOINT_TYPE'] = 'SEG_INITPOINT_CONTINUES'
 
         env['WEST_CURRENT_ITER'] = '%d' % iteration
-        env['WEST_CURRENT_SEG_ID'] = '%d' % id
+        env['WEST_CURRENT_SEG_ID'] = '%d' % propagation_id
         env['WEST_PARENT_ID'] = '%d' % parent_id
-        env['WEST_CURRENT_SEG_DATA_REF'] = '%s/traj_segs/%06d/%06d' % (root, iteration, id)
+        env['WEST_CURRENT_SEG_DATA_REF'] = '%s/traj_segs/%06d/%06d' % (root, iteration, propagation_id)
 
-        env.update(walker.random_seeds)
+        env.update(random_seeds)
 
         pcoor_file = tempfile.NamedTemporaryFile(mode='r')
         env['WEST_PCOORD_RETURN'] = pcoor_file.name
@@ -71,13 +70,13 @@ class WestpaRunner(Runner):
         # creates new_walker from new state and current weight
         pcoor = np.loadtxt(pcoor_file)
         pcoor_file.close()
-
         x = np.atleast_2d(pcoor)[-1, :]
 
         running_acv = walker.state.running_acv
         if running_acv is not None:
             running_acv.add(x)
-        new_state = WestpaWalkerState(positions=x, iteration=iteration, parent_id=id, running_acv=running_acv)
+        new_state = WestpaWalkerState(positions=x, iteration=iteration, parent_id=parent_id,
+                                      id=propagation_id, running_acv=running_acv)
         if debug_prints:
             print('walker #', id, 'with parent', parent_id, 'has weight', walker.weight)
         # Here we create a new walker with a new walker state.
@@ -194,9 +193,10 @@ class RunningAutoCovar(object):
 class WestpaWalkerState(WalkerState):
     'WESTPA compatibility layer for wepy'
 
-    def __init__(self, positions, iteration, parent_id=None, struct_data_ref=None, running_acv=None):
+    def __init__(self, positions, iteration, id, parent_id=None, struct_data_ref=None, running_acv=None):
         self.positions = positions
         self.iteration = iteration
+        self.id = id
         self.parent_id = parent_id
         self.struct_data_ref = struct_data_ref
         self.running_acv = running_acv
@@ -219,11 +219,12 @@ class WestpaWalkerState(WalkerState):
                     use_history=False):
         struct_data_ref = os.path.expandvars(struct_data_ref)
         p_coord = cls.get_pcoords(struct_data_ref=struct_data_ref, get_pcoord=get_pcoord)
+
         if use_history:
             running_acv = RunningAutoCovar()
         else:
             running_acv = None
-        return cls(positions=np.atleast_2d(p_coord)[-1, :], iteration=0, parent_id=-1, struct_data_ref=struct_data_ref,
+        return cls(positions=np.atleast_2d(p_coord)[-1, :], iteration=0, id=-1, struct_data_ref=struct_data_ref,
                    running_acv=running_acv)
 
     @classmethod
@@ -236,7 +237,7 @@ class WestpaWalkerState(WalkerState):
             running_acv = RunningAutoCovar()
         else:
             running_acv = None
-        return cls(positions=np.atleast_2d(p_coord)[-1, :], iteration=iteration, parent_id=id, running_acv=running_acv)
+        return cls(positions=np.atleast_2d(p_coord)[-1, :], iteration=iteration, id=id, running_acv=running_acv)
 
     @staticmethod
     def get_pcoords(struct_data_ref, get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh'):
@@ -291,7 +292,7 @@ def walkers_from_disk(n_expected_walkers=48, path='$WEST_SIM_ROOT/traj_segs/'):
 
 
 class WestpaReporter(Reporter):
-    # TODO: implement westpa-compatible hdf writer
+    # minimal reporter
 
     def init(self, *args, **kwargs):
         pass
