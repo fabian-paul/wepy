@@ -2,6 +2,7 @@ import numpy as np
 import subprocess
 import os
 import tempfile
+import copy
 from wepy.runners.runner import Runner
 from wepy.walker import Walker, WalkerState
 from wepy.reporter.reporter import Reporter
@@ -74,7 +75,7 @@ class WestpaRunner(Runner):
 
         running_acv = walker.state.running_acv
         if running_acv is not None:
-            running_acv.add(x)
+            running_acv = running_acv + x
         new_state = WestpaWalkerState(positions=x, iteration=iteration, parent_id=parent_id,
                                       id=propagation_id, running_acv=running_acv)
         if debug_prints:
@@ -102,7 +103,9 @@ class WestpaRunner(Runner):
 
 class RunningAutoCovar(object):
     'Computes the mean, variance and time-lagged autocovariance of a time series'
-    def __init__(self, n_lag=10, n_decay=None, min_frames=10):
+    def __init__(self, n_lag=10, n_decay=None, min_frames=10,
+                 mean0=None, mean1=None, var0=None, var1=None, acv=None,
+                 dim=None, dtype=None, n_frames_seen=0, deque=None):
         r"""Computes the mean, variance and time-lagged autocovariance of a time series
 
         :param n_lag: int
@@ -116,64 +119,88 @@ class RunningAutoCovar(object):
         import collections
         self.n_lag = n_lag
         if n_decay is None:
-            n_decay = 2*n_lag
-        self.alpha = np.exp(-1.0/n_decay)  # alpha**n_decay = 1/e
+            self.n_decay = 2*n_lag
+        else:
+            self.n_decay = n_decay
         self.min_frames = min_frames
-        self.deque = collections.deque(maxlen=n_lag)
-        self.mean1 = None
-        self.mean0 = None
-        self.var0 = None
-        self.var1 = None
-        self.acv = None
-        self.dim = None
-        self.dtype = None
-        self.n_frames_seen = 0
+        self.mean1 = mean1
+        self.mean0 = mean0
+        self.var0 = var0
+        self.var1 = var1
+        self.acv = acv
+        self.dim = dim
+        self.dtype = dtype
+        self.n_frames_seen = n_frames_seen
+        if deque is None:
+            self.deque = collections.deque(maxlen=n_lag)
+        else:
+            self.deque = deque
 
-    def add(self, x1):
+    def __add__(self, x1):
         r"""Add a frame to the estimation
 
         :param x1: np.ndarray(N)
             data point, 1-D
         """
         if self.dim is None:
-            self.dim = x1.shape[0]
-            self.dtype = x1.dtype
+            dim = x1.shape[0]
+            dtype = x1.dtype
+        else:
+            dim = self.dim
+            dtype = self.dtype
 
-        self.deque.append(x1)
+        deque = copy.copy(self.deque)
+        deque.append(x1)
 
         # https://en.wikipedia.org/wiki/Moving_average#Exponentially_weighted_moving_variance_and_standard_deviation
         # https://stats.stackexchange.com/questions/6874/exponential-weighted-moving-skewness-kurtosis
-        alpha = self.alpha
-        if len(self.deque) >= self.n_lag:
+        alpha = np.exp(-1.0/self.n_decay)  # alpha**n_decay = 1/e
+        if len(deque) >= self.n_lag:
             # update means and variances
             if self.mean1 is None:
-                self.mean1 = x1
-                self.var1 = np.zeros_like(x1)
+                mean1 = x1
+                mean1.flags.writeable = False  # debug
+                var1 = np.zeros_like(x1)
+                var1.flags.writeable = False  # debug
             else:
                 delta1 = x1 - self.mean1
-                self.mean1 = self.mean1 + alpha*delta1
-                self.var1 = (1. - alpha)*(self.var1 + alpha*delta1*delta1)
+                mean1 = self.mean1 + alpha*delta1
+                var1 = (1. - alpha)*(self.var1 + alpha*delta1*delta1)
 
-            x0 = self.deque[0]
+            x0 = deque[0]
 
             # update lagged variance
             if self.mean0 is None:
-                self.mean0 = x0
-                self.var0 = np.zeros_like(x0)
+                mean0 = x0
+                mean0.flags.writeable = False  # debug
+                var0 = np.zeros_like(x0)
+                var0.flags.writeable = False  # debug
             else:
                 delta0 = x0 - self.mean0
-                self.mean0 = self.mean0 + alpha*delta0
-                self.var0 = (1. - alpha)*(self.var0 + alpha*delta0*delta0)
+                mean0 = self.mean0 + alpha*delta0
+                var0 = (1. - alpha)*(self.var0 + alpha*delta0*delta0)
 
             # update (time-lagged) auto-covariances
             if self.acv is None:
-                self.acv = np.zeros_like(x0)
+                acv = np.zeros_like(x0)
+                acv.flags.writeable = False  # debug
             else:
-                self.acv = (1. - alpha)*(self.acv + alpha*delta0*delta1)
+                acv = (1. - alpha)*(self.acv + alpha*delta0*delta1)
 
-            self.n_frames_seen += 1
+            n_frames_seen = self.n_frames_seen + 1
+        else:
+            mean0 = None
+            mean1 = None
+            var0 = None
+            var1 = None
+            acv = None
+            n_frames_seen = 0
 
-            #print('current acf', self.acf)
+        # print('updated RunningAutoCovar')
+
+        return self.__class__(n_lag=self.n_lag, n_decay=self.n_decay, min_frames=self.min_frames,
+                              mean0=mean0, mean1=mean1, var0=var0, var1=var1, acv=acv,
+                              dim=dim, dtype=dtype, n_frames_seen=n_frames_seen, deque=deque)
 
 
     @property
@@ -346,4 +373,40 @@ class PairDistance(Distance):
             return np.linalg.norm(image_a - image_b) / dim**0.5
         else:
             return np.linalg.norm((image_a - image_b)*coordinate_weights) / (np.linalg.norm(coordinate_weights)*dim**0.5)
+
+
+class WestpaUnbindingBC(object):
+
+    def __init__(self, initial_state, cutoff_distance=1.0):
+
+        super().__init__()
+        self.initial_state = initial_state
+        self.cutoff_distance = cutoff_distance
+
+    def _calc_min_distance(self, walker):
+        dim = len(walker.state['positions'])
+        return np.mean(walker.state['positions'])*(dim**-0.5)
+
+    def progress(self, walker):
+        # test to see if the ligand is unbound
+        return self._calc_min_distance(walker) >= self.cutoff_distance
+
+    def warp(self, walker):
+        # set the initial state into a new walker object with the same weight
+        return type(walker)(state=copy.deepcopy(self.initial_state), weight=walker.weight)
+
+    def warp_walkers(self, walkers, cycle, debug_prints=False):
+        new_walkers = []
+        for walker in walkers:
+            unbound = self.progress(walker)
+            # if the walker is unbound we need to warp it
+            if unbound:
+                print('wrapping walker')
+                new_walkers.append(self.warp(walker))
+            # no warping so just return the original walker
+            else:
+                new_walkers.append(walker)
+
+        return new_walkers, None, None, None
+
 
