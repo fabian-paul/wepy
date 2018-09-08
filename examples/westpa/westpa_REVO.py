@@ -37,8 +37,7 @@ def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continu
     else:
         start_cycle = 0
         init_weight = 1.0 / n_walkers
-        init_walkers = [Walker(deepcopy(init_state), init_weight) for i in range(n_walkers)]
-
+        init_walkers = [Walker(deepcopy(init_state), init_weight) for _ in range(n_walkers)]
 
     unb_distance = PairDistance()
 
@@ -54,7 +53,7 @@ def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continu
                           work_mapper=work_mapper,
                           reporters=reporters)
 
-    segment_lengths = [n_steps for i in range(start_cycle + n_cycles)]
+    segment_lengths = [n_steps for _ in range(start_cycle + n_cycles)]
 
     ### RUN the simulation
     for run_idx in range(n_runs):

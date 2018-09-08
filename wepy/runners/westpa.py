@@ -39,7 +39,7 @@ class WestpaRunner(Runner):
     def run_segment(self, walker, segment_length, propagation_id, random_seeds, debug_prints=False):
         # segment_length is ignored for now
         parent_id = walker.state.id
-        iteration = walker.state['iteration'] + 1  # TODO: increment here or later?
+        iteration = walker.state.iteration + 1
         root = self.west_sim_root
 
         env = dict(os.environ)

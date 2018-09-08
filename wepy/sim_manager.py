@@ -60,6 +60,8 @@ class Manager(object):
             if debug_prints:
                 sys.stdout.write("Begin cycle {}\n".format(cycle_idx))
 
+            assert all(w.state.iteration == cycle_idx for w in walkers)
+
             # provide walkers with uncorrelated random numbers.
             # Since we will fan out into threads in the next step, this is the last
             # chance to get uncorrelated random numbers.
