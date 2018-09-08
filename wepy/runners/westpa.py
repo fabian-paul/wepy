@@ -102,7 +102,8 @@ class WestpaRunner(Runner):
 
 
 class RunningAutoCovar(object):
-    'Computes the mean, variance and time-lagged autocovariance of a time series'
+    'Computes the mean, variance and time-lagged autocovariance of a time series. This object is immutable.'
+
     def __init__(self, n_lag=10, n_decay=None, min_frames=10,
                  mean0=None, mean1=None, var0=None, var1=None, acv=None,
                  dim=None, dtype=None, n_frames_seen=0, deque=None):
@@ -202,7 +203,6 @@ class RunningAutoCovar(object):
                               mean0=mean0, mean1=mean1, var0=var0, var1=var1, acv=acv,
                               dim=dim, dtype=dtype, n_frames_seen=n_frames_seen, deque=deque)
 
-
     @property
     def acf(self):
         r"""Compute the time-lagged autocorrlation. This is the autocorrelation function at lag time n_lag
@@ -211,10 +211,19 @@ class RunningAutoCovar(object):
             The time-lagged autocorrelation for each time series.
         """
         if self.n_frames_seen >= self.min_frames:
-            return np.abs(self.acv) / (np.sqrt(self.var0)*np.sqrt(self.var1))
+            return np.abs(self.acv) / (np.sqrt(self.var0*self.var1))
         else:
             return np.ones(self.dim, dtype=self.dtype)
 
+    @staticmethod
+    def mean_acf(racs):
+        if racs[0].n_frames_seen < racs[0].min_frames:
+            return np.ones(racs[0].dim, dtype=racs[0].dtype)
+        else:
+            acv = np.sum([r.acv for r in racs], axis=0)
+            var0 = np.sum([r.var0 for r in racs], axis=0)
+            var1 = np.sum([r.var1 for r in racs], axis=0)
+            return np.abs(acv) / (np.sqrt(var0*var1))
 
 
 class WestpaWalkerState(WalkerState):
@@ -282,6 +291,12 @@ class WestpaWalkerState(WalkerState):
         pcoor = np.loadtxt(pcoor_file)
         pcoor_file.close()
         return np.atleast_2d(pcoor)[-1, :]
+
+    def ensemble_weight(self, states):
+        if self.running_acv is not None:
+            return RunningAutoCovar.mean_acf([s.running_acv for s in states])
+        else:
+            return np.ones_like(self.positions)
 
 
 def _get_dirs(folder):

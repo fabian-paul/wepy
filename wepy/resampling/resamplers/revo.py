@@ -317,7 +317,7 @@ class REVOResampler(Resampler):
             image = self.distance.image(walker.state)
             images.append(image)
 
-        avg_coordinate_weights = np.mean([w.state.coordinate_weights for w in walkers], axis=0)
+        avg_coordinate_weights = walkers[0].state.ensemble_weight([w.state for w in walkers])
         print('avg_coordinate_weights', avg_coordinate_weights)
 
         # get the combinations of indices for all walker pairs
