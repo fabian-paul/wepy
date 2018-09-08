@@ -2,6 +2,7 @@ import numpy as np
 import subprocess
 import os
 import tempfile
+import copy
 from wepy.runners.runner import Runner
 from wepy.walker import Walker, WalkerState
 from wepy.reporter.reporter import Reporter
@@ -154,3 +155,38 @@ class PairDistance(Distance):
         dim = image_a.shape[0]
         dist = np.linalg.norm(image_a - image_b) / dim**0.5
         return dist
+
+class WestpaUnbindingBC(object):
+
+    def __init__(self, initial_state, cutoff_distance=1.0):
+
+        super().__init__()
+        self.initial_state = initial_state
+        self.cutoff_distance = cutoff_distance
+
+    def _calc_min_distance(self, walker):
+        dim = len(walker.state['positions'])
+        return np.mean(walker.state['positions'])*(dim**-0.5)
+
+    def progress(self, walker):
+        # test to see if the ligand is unbound
+        return self._calc_min_distance(walker) >= self.cutoff_distance
+
+    def warp(self, walker):
+        # set the initial state into a new walker object with the same weight
+        return type(walker)(state=copy.deepcopy(self.initial_state), weight=walker.weight)
+
+    def warp_walkers(self, walkers, cycle, debug_prints=False):
+        new_walkers = []
+        for walker in walkers:
+            unbound = self.progress(walker)
+            # if the walker is unbound we need to warp it
+            if unbound:
+                print('wrapping walker')
+                new_walkers.append(self.warp(walker))
+            # no warping so just return the original walker
+            else:
+                new_walkers.append(walker)
+
+        return new_walkers, None, None, None
+

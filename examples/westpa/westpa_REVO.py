@@ -5,11 +5,10 @@ from wepy.sim_manager import Manager
 from wepy.work_mapper.mapper import WorkerMapper, Worker
 
 # the runner for running dynamics and making and it's particular state class
-from wepy.runners.westpa import WestpaRunner, WestpaWalkerState, PairDistance
+from wepy.runners.westpa import WestpaRunner, WestpaWalkerState, PairDistance, WestpaUnbindingBC
 from wepy.walker import Walker
 
 # classes for making the resampler
-from wepy.resampling.distances.receptor import UnbindingDistance
 from wepy.resampling.resamplers.revo import REVOResampler
 
 from wepy.boundary_conditions.boundary import NoBC
@@ -42,11 +41,13 @@ def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continu
 
     reporters = [WalkersPickleReporter(freq=10)]
 
+    boundary_conditions = WestpaUnbindingBC(init_state, 1.0)
+
     # Instantiate a simulation manager
     sim_manager = Manager(init_walkers,
                           runner=runner,
                           resampler=resampler,
-                          boundary_conditions=NoBC(),
+                          boundary_conditions=boundary_conditions,
                           work_mapper=work_mapper,
                           reporters=reporters)
 
