@@ -101,7 +101,7 @@ class WalkersPickleReporter(Reporter):
                     max_cycle = int(cycle)
         if max_cycle == -1:
             raise FileNotFoundError('No restart file was found.')
-        return save_dir + os.sep + max_fname, max_cycle
+        return save_dir + os.sep + max_fname, max_cycle + 1
 
     @staticmethod
     def load_most_recent_cycle(save_dir='./', debug_prints=False):
