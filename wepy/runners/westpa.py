@@ -309,7 +309,7 @@ def _get_dirs(folder):
 
 
 def walkers_from_disk(n_expected_walkers=48, path='$WEST_SIM_ROOT/traj_segs/'):
-    # find the last iteration that was completed
+    # find the last iteration that was completed; this is for emergency cases and other hacks
     path = os.path.expandvars(path)
     max_iteration = -1
     n_found_walkers = {}
@@ -319,18 +319,15 @@ def walkers_from_disk(n_expected_walkers=48, path='$WEST_SIM_ROOT/traj_segs/'):
         if len(set([int(d) for d in subdirs]) & set(range(n_expected_walkers))) == n_expected_walkers:
             max_iteration = max(max_iteration, iteration)
             n_found_walkers[iteration] = len(set([int(d) for d in subdirs]))
-
     if max_iteration == -1:
         raise RuntimeError('no valid iteration found')
-
-    weights = np.ones(n_expected_walkers, dtype=float) / n_expected_walkers  # TODO: recover the correct weights from restart file
-
+    weights = np.ones(n_expected_walkers, dtype=float) / n_expected_walkers
     assert n_found_walkers[max_iteration] == n_expected_walkers
-    walkers = [Walker(WestpaWalkerState.from_file(iteration=max_iteration, id=i), weight=weights[i]) for i in range(n_found_walkers[max_iteration])]
-
-    print('continuing at iteration', max_iteration, 'with', n_found_walkers[max_iteration], 'walkers')
-
-    return walkers
+    walkers = [Walker(WestpaWalkerState.from_file(iteration=max_iteration, id=i), weight=weights[i]) for i in
+               range(n_found_walkers[max_iteration])]
+    print('continuing at iteration', max_iteration, 'with', n_found_walkers[max_iteration],
+          'walkers and with discarded weights')
+    return walkers, max_iteration
 
 
 class WestpaReporter(Reporter):
