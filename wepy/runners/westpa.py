@@ -132,6 +132,42 @@ class WestpaWalkerState(WalkerState):
         pcoor_file.close()
         return np.atleast_2d(pcoor)[-1, :]
 
+    @classmethod
+    def from_file(cls, iteration, id, path='$WEST_SIM_ROOT/traj_segs/%06d/%06d',
+                  get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh'):
+        path = os.path.expandvars(path % (iteration, id))
+        p_coord = cls.get_pcoords(struct_data_ref=path, get_pcoord=get_pcoord)
+        return cls(positions=np.atleast_2d(p_coord)[-1, :], iteration=iteration, id=id)
+
+
+def _get_dirs(folder):
+    dirs = []
+    with os.scandir(folder) as it:
+        for entry in it:
+            if entry.is_dir():
+                dirs.append(entry.name)
+    return dirs
+
+
+def walkers_from_disk(n_expected_walkers=48, path='$WEST_SIM_ROOT/traj_segs/'):
+    # find the last iteration that was completed; this is for emergency cases and other hacks
+    path = os.path.expandvars(path)
+    max_iteration = -1
+    n_found_walkers = {}
+    for topdir in [d for d in _get_dirs(path) if d.isdigit()]:
+        iteration = int(topdir)
+        subdirs = [d for d in _get_dirs(path + topdir) if d.isdigit()]
+        if len(set([int(d) for d in subdirs]) & set(range(n_expected_walkers))) == n_expected_walkers:
+            max_iteration = max(max_iteration, iteration)
+            n_found_walkers[iteration] = len(set([int(d) for d in subdirs]))
+    if max_iteration == -1:
+        raise RuntimeError('no valid iteration found')
+    weights = np.ones(n_expected_walkers, dtype=float) / n_expected_walkers
+    assert n_found_walkers[max_iteration] == n_expected_walkers
+    walkers = [Walker(WestpaWalkerState.from_file(iteration=max_iteration, id=i), weight=weights[i]) for i in range(n_found_walkers[max_iteration])]
+    print('continuing at iteration', max_iteration, 'with', n_found_walkers[max_iteration], 'walkers and with discarded weights')
+    return walkers, max_iteration
+
 
 class WestpaReporter(Reporter):
     # minimal reporter
