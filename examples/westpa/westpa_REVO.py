@@ -43,7 +43,7 @@ def main(n_walkers=36, n_workers=12, n_runs=1, n_cycles=20, n_steps=100, continu
 
     reporters = [WalkersPickleReporter(freq=10), WestpaReporter(n_walkers=n_walkers)]
 
-    boundary_conditions = WestpaUnbindingBC(init_state, 1.0)
+    boundary_conditions = WestpaUnbindingBC(init_state, 3.0)
 
     # Instantiate a simulation manager
     sim_manager = Manager(init_walkers,

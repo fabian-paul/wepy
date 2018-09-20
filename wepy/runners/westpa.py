@@ -235,6 +235,15 @@ class RunningAutoCovar(object):
             var1 = np.sum([r.var1 for r in racs], axis=0)
             return np.abs(acv) / (np.sqrt(var0*var1))
 
+    @staticmethod
+    def mean_std(racs):
+        if racs[0].n_frames_seen < racs[0].min_frames:
+            print('returning ones')
+            return np.ones(racs[0].dim, dtype=racs[0].dtype)
+        else:
+            print('actually computing something, var0 =', racs[0].var0, 'from', len(racs[0].deque))
+            var0 = np.mean([r.var0 for r in racs], axis=0)
+            return np.sqrt(var0)
 
 class WestpaWalkerState(WalkerState):
     'WESTPA compatibility layer for wepy'
@@ -304,7 +313,7 @@ class WestpaWalkerState(WalkerState):
 
     def ensemble_weight(self, states):
         if self.running_acv is not None:
-            return RunningAutoCovar.mean_acf([s.running_acv for s in states])
+            return 1.0/RunningAutoCovar.mean_std([s.running_acv for s in states])
         else:
             return np.ones_like(self.positions)
 
@@ -390,7 +399,7 @@ class PairDistance(Distance):
         return state['positions']
 
     def image_distance(self, image_a, image_b, coordinate_weights=None):
-        dim = image_a.shape[0]
+        dim = image_a.shape[0]//3
         if coordinate_weights is None:
             return np.linalg.norm(image_a - image_b) / dim**0.5
         else:
@@ -406,8 +415,8 @@ class WestpaUnbindingBC(object):
         self.cutoff_distance = cutoff_distance
 
     def _calc_min_distance(self, walker):
-        dim = len(walker.state['positions'])
-        return np.mean(walker.state['positions'])*(dim**-0.5)
+        dim = len(walker.state['positions'])//3
+        return np.linalg.norm(walker.state['positions'])*(dim**-0.5)
 
     def progress(self, walker):
         # test to see if the ligand is unbound
