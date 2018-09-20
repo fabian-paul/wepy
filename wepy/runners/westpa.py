@@ -104,7 +104,7 @@ class WestpaRunner(Runner):
 class RunningAutoCovar(object):
     'Computes the mean, variance and time-lagged autocovariance of a time series. This object is immutable.'
 
-    def __init__(self, n_lag=10, n_decay=None, min_frames=10,
+    def __init__(self, n_lag=50, n_decay=None, min_frames=10,
                  mean0=None, mean1=None, var0=None, var1=None, acv=None,
                  dim=None, dtype=None, n_frames_seen=0, deque=None):
         r"""Computes the mean, variance and time-lagged autocovariance of a time series
@@ -136,6 +136,13 @@ class RunningAutoCovar(object):
             self.deque = collections.deque(maxlen=n_lag)
         else:
             self.deque = deque
+
+    @classmethod
+    def new_with_prior(cls, x, sigma=1.0, n_lag=50, n_decay=None):
+        s = sigma*np.ones_like(x)
+        rac = cls(n_lag=n_lag, n_decay=n_decay, min_frames=0, mean0=x, mean1=x, var0=s,
+                  var1=s, acv=s, dim=x.shape[-1], dtype=x.dtype)
+        return rac
 
     def __add__(self, x1):
         r"""Add a frame to the estimation
@@ -190,11 +197,11 @@ class RunningAutoCovar(object):
 
             n_frames_seen = self.n_frames_seen + 1
         else:
-            mean0 = None
-            mean1 = None
-            var0 = None
-            var1 = None
-            acv = None
+            mean0 = self.mean0
+            mean1 = self.mean1
+            var0 = self.var0
+            var1 = self.var1
+            acv = self.acv
             n_frames_seen = 0
 
         # print('updated RunningAutoCovar')
@@ -257,10 +264,10 @@ class WestpaWalkerState(WalkerState):
         p_coord = cls.get_pcoords(struct_data_ref=struct_data_ref, get_pcoord=get_pcoord)
 
         if use_history:
-            running_acv = RunningAutoCovar()
+            running_acv = RunningAutoCovar.new_with_prior(x=p_coord, sigma=0.3)
         else:
             running_acv = None
-        return cls(positions=np.atleast_2d(p_coord)[-1, :], iteration=0, id=-1, struct_data_ref=struct_data_ref,
+        return cls(positions=p_coord, iteration=0, id=-1, struct_data_ref=struct_data_ref,
                    running_acv=running_acv)
 
     @classmethod
@@ -270,10 +277,10 @@ class WestpaWalkerState(WalkerState):
         path = os.path.expandvars(path % (iteration, id))
         p_coord = cls.get_pcoords(struct_data_ref=path, get_pcoord=get_pcoord)
         if use_history:
-            running_acv = RunningAutoCovar()
+            running_acv = RunningAutoCovar.new_with_prior(x=p_coord, sigma=0.3)
         else:
             running_acv = None
-        return cls(positions=np.atleast_2d(p_coord)[-1, :], iteration=iteration, id=id, running_acv=running_acv)
+        return cls(positions=p_coord, iteration=iteration, id=id, running_acv=running_acv)
 
     @staticmethod
     def get_pcoords(struct_data_ref, get_pcoord='$WEST_SIM_ROOT/westpa_scripts/get_pcoord.sh'):
