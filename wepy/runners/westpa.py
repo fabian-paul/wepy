@@ -162,7 +162,8 @@ class RunningAutoCovar(object):
 
         # https://en.wikipedia.org/wiki/Moving_average#Exponentially_weighted_moving_variance_and_standard_deviation
         # https://stats.stackexchange.com/questions/6874/exponential-weighted-moving-skewness-kurtosis
-        alpha = np.exp(-1.0/self.n_decay)  # alpha**n_decay = 1/e
+        # https://vlab.stern.nyu.edu/doc/12?topic=mdls
+        alpha = 1. - np.exp(-1./self.n_decay)  # (1 - alpha)**n_decay = 1/e
         if len(deque) >= self.n_lag:
             # update means and variances
             if self.mean1 is None:
@@ -225,8 +226,10 @@ class RunningAutoCovar(object):
     @staticmethod
     def mean_acf(racs):
         if racs[0].n_frames_seen < racs[0].min_frames:
+            print('returning ones')
             return np.ones(racs[0].dim, dtype=racs[0].dtype)
         else:
+            print('actually computing something, var0 =', racs[0].var0, 'from', len(racs[0].deque))
             acv = np.sum([r.acv for r in racs], axis=0)
             var0 = np.sum([r.var0 for r in racs], axis=0)
             var1 = np.sum([r.var1 for r in racs], axis=0)
