@@ -355,11 +355,11 @@ class WestpaReporter(Reporter):
     def __init__(self, n_walkers, hdf5_fname='we.hdf5'):
         import h5py
         self.hdf5 = h5py.File(hdf5_fname, mode='a')
-        if 'pedigree' not in self.hdf5:
-            self.hdf5.create_dataset('pedigree', (100, n_walkers,), maxshape=(None, n_walkers), dtype='i8')
-        self.pedigree = self.hdf5['pedigree']
+        if 'tree' not in self.hdf5:
+            self.hdf5.create_dataset('tree', (128, n_walkers,), maxshape=(None, n_walkers), dtype='i8')
+        self.tree = self.hdf5['tree']
         if 'weights' not in self.hdf5:
-            self.hdf5.create_dataset('weights', (100, n_walkers,), maxshape=(None, n_walkers), dtype='float64')
+            self.hdf5.create_dataset('weights', (128, n_walkers,), maxshape=(None, n_walkers), dtype='float64')
         self.weights = self.hdf5['weights']
         self.n_walkers = n_walkers
 
@@ -371,10 +371,10 @@ class WestpaReporter(Reporter):
 
         weights_size = self.weights.shape[0]
         if weights_size <= cycle_idx:
-            self.weights.resize(weights_size + 128)
-        pedigree_size = self.pedigree.shape[0]
-        if self.pedigree.shape[0] <= cycle_idx:
-            self.pedigree.resize(pedigree_size + 128)
+            self.weights.resize((weights_size + 128, self.weights.shape[1]))
+        tree_size = self.tree.shape[0]
+        if self.tree.shape[0] <= cycle_idx:
+            self.tree.resize((tree_size + 128, self.tree.shape[1]))
 
         walker_weights = [w.weight for w in walkers]
         current_walker_ids = [w.state['id'] for w in walkers]
@@ -384,9 +384,9 @@ class WestpaReporter(Reporter):
         current_weigths[current_walker_ids] = walker_weights
         self.weights[cycle_idx, :] = current_weigths
 
-        current_pedigree = np.zeros(self.n_walkers, dtype='i8')
-        current_pedigree[current_walker_ids] = parent_walker_ids
-        self.pedigree[cycle_idx, :] = current_pedigree
+        current_level = np.zeros(self.n_walkers, dtype='i8')
+        current_level[current_walker_ids] = parent_walker_ids
+        self.tree[cycle_idx, :] = current_level
 
         self.hdf5.flush()
 
