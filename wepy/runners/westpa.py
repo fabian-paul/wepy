@@ -101,8 +101,84 @@ class WestpaRunner(Runner):
                 raise RuntimeError('running post-iteration script failed')
 
 
+class SimpleRunningAutoCovar(object):
+    'Computes the exponentially weighted mean and variance a vectorial time series. This object is immutable.'
+
+    def __init__(self, n_lag=50, n_decay=None, min_frames=10,
+                 mean=None, var=None, dim=None, dtype=None, n_frames_seen=0):
+        r"""Computes the mean, variance and time-lagged autocovariance of a time series
+
+        :param n_lag: int
+            lag time of
+        :param n_decay: int or None
+            parametrizes the speed with which past frames are forgotten
+            If `n_decay` is None, use `2*n_lag`.
+        :param min_frames: int
+            only report statistical averages when at least n_lag + min_frames have been added
+        """
+        self.n_lag = n_lag
+        if n_decay is None:
+            self.n_decay = 2*n_lag
+        else:
+            self.n_decay = n_decay
+        self.min_frames = min_frames
+        self.mean = mean
+        self.var = var
+        self.dim = dim
+        self.dtype = dtype
+        self.n_frames_seen = n_frames_seen
+
+    @classmethod
+    def new_with_prior(cls, x, sigma=1.0, n_lag=50, n_decay=None):
+        s = sigma*np.ones_like(x)
+        rac = cls(n_lag=n_lag, n_decay=n_decay, min_frames=0, mean=x, var=s, dim=x.shape[-1], dtype=x.dtype)
+        return rac
+
+    def __add__(self, x0):
+        r"""Add a frame to the estimation
+
+        :param x1: np.ndarray(N)
+            data point, 1-D
+        """
+        if self.dim is None:
+            dim = x0.shape[0]
+            dtype = x0.dtype
+        else:
+            dim = self.dim
+            dtype = self.dtype
+
+        # https://en.wikipedia.org/wiki/Moving_average#Exponentially_weighted_moving_variance_and_standard_deviation
+        # https://stats.stackexchange.com/questions/6874/exponential-weighted-moving-skewness-kurtosis
+        alpha = 1. - np.exp(-1./self.n_decay)  # (1 - alpha)**n_decay = 1/e
+        if self.mean is None:
+            mean = x0
+            mean.flags.writeable = False  # debug
+            var = np.zeros_like(x0)
+            var.flags.writeable = False  # debug
+        else:
+            delta = x0 - self.mean
+            mean = self.mean + alpha*delta
+            var = (1. - alpha)*(self.var + alpha*delta*delta)
+
+        n_frames_seen = self.n_frames_seen + 1
+
+        return self.__class__(n_lag=self.n_lag, n_decay=self.n_decay, min_frames=self.min_frames,
+                              mean=mean, var=var, dim=dim, dtype=dtype, n_frames_seen=n_frames_seen)
+
+    @staticmethod
+    def mean_std(racs):
+        if racs[0].n_frames_seen < racs[0].min_frames:
+            print('returning ones')
+            return np.ones(racs[0].dim, dtype=racs[0].dtype)
+        else:
+            print('actually computing something, var =', racs[0].var, 'from', len(racs[0].n_frames_seen))
+            var = np.mean([r.var for r in racs], axis=0)
+            return np.sqrt(var)
+
+
 class RunningAutoCovar(object):
-    'Computes the mean, variance and time-lagged autocovariance of a time series. This object is immutable.'
+    'Computes the exponentially weighted mean, variance and time-lagged autocovariance of a time series. \
+     This object is immutable.'
 
     def __init__(self, n_lag=50, n_decay=None, min_frames=10,
                  mean0=None, mean1=None, var0=None, var1=None, acv=None,
@@ -245,6 +321,7 @@ class RunningAutoCovar(object):
             var0 = np.mean([r.var0 for r in racs], axis=0)
             return np.sqrt(var0)
 
+
 class WestpaWalkerState(WalkerState):
     'WESTPA compatibility layer for wepy'
 
@@ -361,6 +438,9 @@ class WestpaReporter(Reporter):
         if 'weights' not in self.hdf5:
             self.hdf5.create_dataset('weights', (128, n_walkers,), maxshape=(None, n_walkers), dtype='float64')
         self.weights = self.hdf5['weights']
+        if 'variances' not in self.hdf5:
+            self.hdf5.create_dataset('variances', (128, n_walkers,), maxshape=(None, n_walkers), dtype='float64')
+        self.variances = self.hdf5['variances']
         self.n_walkers = n_walkers
 
     def report(self, cycle_idx, new_walkers, warp_data, bc_data, progress_data,
@@ -375,6 +455,9 @@ class WestpaReporter(Reporter):
         tree_size = self.tree.shape[0]
         if self.tree.shape[0] <= cycle_idx:
             self.tree.resize((tree_size + 128, self.tree.shape[1]))
+        variances_size = self.variances.shape[0]
+        if self.variances.shape[0] <= cycle_idx:
+            self.variances.resize((variances_size + 128, self.variances.shape[1]))
 
         walker_weights = [w.weight for w in walkers]
         current_walker_ids = [w.state['id'] for w in walkers]
@@ -387,6 +470,10 @@ class WestpaReporter(Reporter):
         current_level = np.zeros(self.n_walkers, dtype='i8')
         current_level[current_walker_ids] = parent_walker_ids
         self.tree[cycle_idx, :] = current_level
+
+        if all(w.state.running_acv is not None for w in new_walkers):
+            variances = [w.state.running_acv.var for w in new_walkers]
+            self.variances[cycle_idx, :] = np.array(variances)
 
         self.hdf5.flush()
 
